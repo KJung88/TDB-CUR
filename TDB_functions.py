@@ -86,7 +86,7 @@ def rk4_5stage_step(y, dt, L):
         y_array[:, 2] = y_array[:, 0] + beta_5[jstage] * dt * rr_tmp  # Store for the next stage
     return y_array[:,0]
 
-def rk4_5_stage_subcycle_rev(y, dt, L, n_sub, p_index, s_index, missing_p, missing_s):
+def rk4_5_stage_subcycle_Sep21(y, dt, L, n_sub, p_index, s_index, missing_p, missing_s):
 
     nstage = 5
 
@@ -107,13 +107,10 @@ def rk4_5_stage_subcycle_rev(y, dt, L, n_sub, p_index, s_index, missing_p, missi
         y_update = np.copy(y_array)    
         for n in range (0,len(p_index)):
             p = p_index[n]            
-            if (jstage ==2):
-                y_array[p,:,1] = y_array[p,:, 0] @ L
-            else:
-                for _ in range(n_sub):
-                    dt_sub = dt*(alpha_5[jstage] + beta_5[jstage])/n_sub
-                    y_update[p,:,2] = rk4_5stage_step(y_update[p,:,2],dt_sub,L)                 
-                y_array[p,:,1] = (y_update[p,:,2] - y_array[p,:,2]) /(dt_sub*n_sub)
+            for _ in range(n_sub):
+                dt_sub = dt*(alpha_5[jstage] + beta_5[jstage])/n_sub
+                y_update[p,:,2] = rk4_5stage_step(y_update[p,:,2],dt_sub,L)                 
+            y_array[p,:,1] = (y_update[p,:,2] - y_array[p,:,2]) /(dt_sub*n_sub)
 
         G_s = y_array[:,s_index,1]    
         
@@ -212,3 +209,72 @@ def DEIM_penalty (A,fast_species):
     phi=phi.astype(int)
     phi_sorted = natsort.natsorted(phi)
     return phi_sorted
+
+alpha = [0.21815080522985902, 0.25670246980151867, 0.52740259200752049, 4.8486426722446734E-002, 1.2451707153353009, 0.41236603484323697]
+beta = [-0.11355413804416649, -0.21511858781840007, -5.1015214625057696E-002, -1.0799268622388112, -0.24866424121344732, 0.0000000000000000]
+beta2 = [0.0, -0.11355413804416649, -0.21511858781840007, -5.1015214625057696E-002, -1.0799268622388112, -0.24866424121344732, 0.0000000000000000]
+
+
+def rk4_6stage_step(y, dt, L):
+    nstage = 6
+    n_var = np.shape(y)[0]
+    y_array = np.zeros((n_var, 3))  # Solution, R.H.S., Intermediate
+
+    y_array[:, 0] = np.copy(y)  # Initial state
+    y_array[:, 1] = 0.0  # Initial R.H.S. as zero
+    y_array[:, 2] = np.copy(y_array[:, 0])  # Intermediate
+
+    for jstage in range(nstage):
+        rr_tmp = np.dot(y_array[:, 0], L)  # R.H.S.
+        y_array[:, 0] = y_array[:, 2] + alpha[jstage] * dt * rr_tmp  # Update the solution
+        y_array[:, 2] = y_array[:, 0] + beta[jstage] * dt * rr_tmp  # Store for the next stage
+    return y_array[:,0]
+
+    
+def rk4_6_stage_subcycle_Sep23(y, dt, L, n_sub, p_index, s_index, missing_p, missing_s):
+
+    nstage = 6
+
+    n_data = np.shape(y)[0]
+    n_var = np.shape(y)[1]
+    y_array = np.zeros(((n_data,n_var,3)))  ## first : solution vector, second: r.h.s vector, third : intermediate
+    
+    y_array[:,:,0] = np.copy(y)
+    y_array[:,:,1] = 0.0
+    y_array[:,:,2] = np.copy(y_array[:,:,0])
+
+    y_sol = np.zeros((n_data,n_var))
+    
+    for jstage in range (0,nstage):            
+        y_array[:,:,1] = 0.0        
+        
+        y_array[:,:,1] = y_array[:,:,0] @ L  ## R.H.S.
+        y_array[:,missing_s,1] = 0.0  ## R.H.S. =0 if not F(:,s)
+        
+        y_update = np.copy(y_array)    
+        for n in range (0,len(p_index)):
+            p = p_index[n]
+            if (jstage ==3):
+                dt_sub = dt*(alpha[jstage] + beta[jstage])                                      
+                y_update[p,:,2] = rk4_6stage_step(y_update[p,:,2],dt_sub,L)  
+                y_array[p,:,1] = (y_update[p,:,2] - y_array[p,:,2]) /(dt_sub)
+            else:
+                for _ in range(n_sub):
+                    dt_sub = dt*(alpha[jstage] + beta[jstage])/n_sub
+                    y_update[p,:,2] = rk4_6stage_step(y_update[p,:,2],dt_sub,L)  
+                y_array[p,:,1] = (y_update[p,:,2] - y_array[p,:,2]) /(dt_sub*n_sub)
+
+        G_s = y_array[:,s_index,1]    
+        Q, _ = np.linalg.qr(G_s, mode='reduced')
+
+        Q_dagger = (np.linalg.inv(Q[p_index,:].T @ Q[p_index,:]) @ Q[p_index,:].T)
+        F_appro = Q @ Q_dagger @ y_array[p_index,:,1]
+
+        #Option 3: F(not p,sa) is approximated by a oblique projection 
+        for q in range (0,len(missing_s)):
+            y_array[missing_p,missing_s[q],1] = F_appro[missing_p,missing_s[q]]  ###       
+        
+        y_array[:,:,0] = y_array[:,:,2] + alpha[jstage] * dt * y_array[:,:,1]
+        y_array[:,:,2] = y_array[:,:,0] + beta[jstage] * dt * y_array[:,:,1]
+        
+    return y_array[:,:,0]
